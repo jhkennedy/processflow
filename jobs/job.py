@@ -34,13 +34,33 @@ class Job(object):
         self._run_type = kwargs.get('run_type')
         self._job_type = None
         self._input_file_paths = list()
+        self._input_base_path = ''
         self._console_output_path = None
         self._output_path = ''
         self._dryrun = dryrun
         self._manager_args = {
-            'slurm': ['-n 16', '-t 0-10:00', '-N 1'],
+            'slurm': ['-t 0-10:00', '-N 1'],
             'pbs': ['-l nodes=1:ppn=1', '-q acme', '-l walltime=02:00:00']
         }
+        config = kwargs['config']
+        # setup the default replacement dict
+        self._replace_dict = {
+            'PROJECT_PATH': config['global']['project_path'],
+            'REMOTE_PATH': config['simulations'][case].get('remote_path', ''),
+            'CASEID': case,
+            'REST_YR': '{:04d}'.format(self.start_year + 1),
+            'START_YR': '{:04d}'.format(self.start_year),
+            'END_YR': '{:04d}'.format(self.end_year),
+            'LOCAL_PATH': config['simulations'][case].get('local_path', ''),
+        }
+    # -----------------------------------------------
+
+    def setup_output_directory(self, custom_output_string):
+        for string, val in list(self._replace_dict.items()):
+            if string in custom_output_string:
+                custom_output_string = custom_output_string.replace(
+                    string, val)
+        return custom_output_string
     # -----------------------------------------------
 
     def setup_dependencies(self, *args, **kwargs):
@@ -60,7 +80,7 @@ class Job(object):
         raise Exception(msg)
     # -----------------------------------------------
 
-    def handle_completion(self, *args, **kwargs):
+    def handle_completion(self, filemanager, event_list, config, *args, **kwargs):
         msg = '{} has not implemented the handle_completion method'.format(
             self.job_type)
         raise Exception(msg)
@@ -108,12 +128,21 @@ class Job(object):
         symlinks all data_types sepecified in the jobs _data_required field,
         and puts a copy of the path for the links into the _input_file_paths field
         """
+
+        # loop over the data types, linking them in one at a time
         for datatype in self._data_required:
+
             datainfo = config['data_types'].get(datatype)
+
+            # this should never be hit if the config validator did its job
             if not datainfo:
-                print "ERROR: Unable to find config information for {}".format(datatype)
+                print "ERROR: Unable to find config information for {}".format(
+                    datatype)
                 sys.exit(1)
+
+            # are these history files?
             monthly = datainfo.get('monthly')
+
             # first get the list of file paths to the data
             if monthly == 'True' or monthly == True:
                 files = filemanager.get_file_paths_by_year(
@@ -138,41 +167,34 @@ class Job(object):
                 tail, head = os.path.split(file)
                 filesnames.append(head)
 
-            # setup the temp directory to hold symlinks
-            if self._run_type is not None:
-                temp_path = os.path.join(
-                    config['global']['project_path'],
-                    'output', 'temp', self._short_name,
-                    '{}_{}'.format(self._job_type, self._run_type),
-                    '{:04d}_{:04d}'.format(self._start_year, self._end_year))
-            elif isinstance(self, Diag):
-                if self._comparison == 'obs':
-                    comp = 'obs'
-                else:
-                    comp = config['simulations'][self.comparison]['short_name']
-                temp_path = os.path.join(
-                    config['global']['project_path'],
-                    'output', 'temp', self._short_name, self._job_type,
-                    '{:04d}_{:04d}_vs_{}'.format(self._start_year, self._end_year, comp))
-            else:
-                temp_path = os.path.join(
-                    config['global']['project_path'],
-                    'output', 'temp', self._short_name, self._job_type,
-                    '{:04d}_{:04d}'.format(self._start_year, self._end_year))
-            if not os.path.exists(temp_path):
-                os.makedirs(temp_path)
+            # create the path to where we should place our temp symlinks
+            self._input_base_path = self.setup_temp_path(
+                config=config)
+            if not os.path.exists(self._input_base_path):
+                os.makedirs(self._input_base_path)
 
             # keep a reference to the input data for later
             self._input_file_paths.extend(
-                [os.path.join(temp_path, x) for x in filesnames])
+                [os.path.join(self._input_base_path, x) for x in filesnames])
 
             # create the symlinks
             create_symlink_dir(
                 src_dir=tail,
                 src_list=filesnames,
-                dst=temp_path)
+                dst=self._input_base_path)
 
         return
+    # -----------------------------------------------
+
+    def setup_temp_path(self, config, *args, **kwards):
+        """
+        creates the default input path structure
+        /project/output/temp/case_short_name/job_type/start_end
+        """
+        return os.path.join(
+            config['global']['project_path'],
+            'output', 'temp', self._short_name, self._job_type,
+            '{:04d}_{:04d}'.format(self._start_year, self._end_year))
     # -----------------------------------------------
 
     def check_data_ready(self, filemanager):
@@ -219,13 +241,6 @@ class Job(object):
                 start=self.start_year,
                 end=self.end_year,
                 case=self.short_name)
-        elif isinstance(self, Diag):
-            return '{type}-{start:04d}-{end:04d}-{case}-vs-{comp}'.format(
-                type=self.job_type,
-                start=self.start_year,
-                end=self.end_year,
-                case=self.short_name,
-                comp=self._short_comp_name)
         else:
             return '{type}-{start:04d}-{end:04d}-{case}'.format(
                 type=self.job_type,
@@ -234,7 +249,15 @@ class Job(object):
                 case=self.short_name)
     # -----------------------------------------------
 
-    def _submit_cmd_to_manager(self, config, cmd):
+    def get_run_name(self):
+        return '{type}_{start:04d}_{end:04d}_{case}'.format(
+            type=self.job_type,
+            start=self.start_year,
+            end=self.end_year,
+            case=self.short_name)
+    # -----------------------------------------------
+
+    def _submit_cmd_to_manager(self, config, cmd, event_list):
         """
         Takes the jobs main cmd, generates a batch script and submits the script
         to the resource manager controller
@@ -242,34 +265,14 @@ class Job(object):
         Parameters:
             cmd (str): the command to submit
             config (dict): the global configuration object
-        Retuns:
+        Returns:
             job_id (int): the job_id from the resource manager
         """
         # setup for the run script
         scripts_path = os.path.join(
             config['global']['project_path'],
             'output', 'scripts')
-        if self._run_type is not None:
-            run_name = '{type}_{run_type}_{start:04d}_{end:04d}_{case}'.format(
-                type=self.job_type,
-                run_type=self._run_type,
-                start=self.start_year,
-                end=self.end_year,
-                case=self.short_name)
-        elif isinstance(self, Diag):
-            run_name = '{type}_{start:04d}_{end:04d}_{case}_vs_{comp}'.format(
-                type=self.job_type,
-                run_type=self._run_type,
-                start=self.start_year,
-                end=self.end_year,
-                case=self.short_name,
-                comp=self._short_comp_name)
-        else:
-            run_name = '{type}_{start:04d}_{end:04d}_{case}'.format(
-                type=self.job_type,
-                start=self.start_year,
-                end=self.end_year,
-                case=self.short_name)
+        run_name = self.get_run_name()
         run_script = os.path.join(scripts_path, run_name)
         self._console_output_path = '{}.out'.format(run_script)
         if os.path.exists(run_script):
@@ -329,12 +332,6 @@ class Job(object):
             logging.info(msg)
             self.status = JobStatus.COMPLETED
             return False
-        else:
-            if not self.prevalidate():
-                return False
-            if self.postvalidate(config):
-                self.status = JobStatus.COMPLETED
-                return True
 
         # submit the run script to the resource controller
         self._job_id = manager.batch(run_script)
@@ -398,6 +395,7 @@ class Job(object):
     @property
     def data_ready(self):
         return self._data_ready
+    # -----------------------------------------------
 
     @data_ready.setter
     def data_ready(self, ready):
@@ -414,6 +412,7 @@ class Job(object):
     @property
     def data_required(self):
         return self._data_required
+    # -----------------------------------------------
 
     @data_required.setter
     def data_required(self, types):
@@ -423,6 +422,7 @@ class Job(object):
     @property
     def status(self):
         return self._status
+    # -----------------------------------------------
 
     @status.setter
     def status(self, nstatus):
@@ -432,6 +432,7 @@ class Job(object):
     @property
     def job_id(self):
         return self._job_id
+    # -----------------------------------------------
 
     @job_id.setter
     def job_id(self, new_id):
@@ -456,6 +457,4 @@ class Job(object):
             'short_name': self._short_name
         }, sort_keys=True, indent=4)
 
-
     # -----------------------------------------------
-from jobs.diag import Diag

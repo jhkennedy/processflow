@@ -63,7 +63,7 @@ def native_cleanup(config):
     Remove non-regridded output files after processflow completion
     """
     for case in config['simulations']:
-        if case in ['start_year', 'end_year', 'comparisons']: continue
+        if case in ['start_year', 'end_year']: continue
         native_path = os.path.join(
             config['global']['project_path'],
             'output', 'pp',

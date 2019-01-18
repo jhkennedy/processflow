@@ -22,21 +22,47 @@ class Aprime(Diag):
         super(Aprime, self).__init__(*args, **kwargs)
         self._job_type = 'aprime'
         self._requires = ''
-        self._host_path = ''
-        self._host_url = ''
         self._input_base_path = ''
         self._data_required = ['atm', 'cice', 'ocn',
                                'ocn_restart', 'cice_restart',
                                'ocn_streams', 'cice_streams',
                                'ocn_in', 'cice_in',
                                'meridionalHeatTransport']
-        custom_args = kwargs['config']['diags']['aprime'].get('custom_args')
-        if custom_args:
-            self.set_custom_args(custom_args)
-        if self.comparison == 'obs':
-            self._short_comp_name = 'obs'
+
+        config = kwargs.get('config')
+        if config:
+            if config['global'].get('host'):
+                self._host_path = os.path.join(
+                    config['img_hosting']['host_directory'],
+                    self.case,
+                    'aprime')
+            custom_args = config['diags'][self.job_type].get(
+                'custom_args')
+            if custom_args:
+                self.set_custom_args(custom_args)
+
+            # setup the output directory, creating it if it doesnt already exist
+            custom_output_path = config['diags'][self.job_type].get(
+                'custom_output_path')
+            if custom_output_path:
+                self._replace_dict['COMPARISON'] = self._short_comp_name
+                self._output_path = self.setup_output_directory(custom_output_path)
+            else:
+                self._output_path = os.path.join(
+                    kwargs['config']['global']['project_path'],
+                    'output',
+                    'diags',
+                    self.short_name,
+                    self.job_type,
+                    '{start:04d}_{end:04d}_vs_{comp}'.format(
+                        start=self.start_year,
+                        end=self.end_year,
+                        comp=self._short_comp_name))
+            if not os.path.exists(self._output_path):
+                os.makedirs(self._output_path)
         else:
-            self._short_comp_name = kwargs['config']['simulations'][self.comparison]['short_name']
+            self._host_path = ''
+            self._output_path = ''
     # -----------------------------------------------
 
     def setup_dependencies(self, *args, **kwargs):
@@ -59,24 +85,8 @@ class Aprime(Diag):
         """
         self._dryrun = dryrun
 
-        # sets up the output path, creating it if it doesnt already exist
-        self._output_path = os.path.join(
-            config['global']['project_path'],
-            'output', 'diags', self.short_name, 'aprime',
-            '{start:04d}_{end:04d}_vs_{comp}'.format(
-                start=self.start_year,
-                end=self.end_year,
-                comp=self._short_comp_name))
-        if not os.path.exists(self._output_path):
-            os.makedirs(self._output_path)
-
         # fix the input paths
         self._fix_input_paths()
-
-        self._host_path = os.path.join(
-            config['img_hosting']['host_directory'],
-            self.short_name,
-            'aprime')
 
         # setup template
         template_out = os.path.join(
@@ -100,6 +110,9 @@ class Aprime(Diag):
             config['global']['resource_path'],
             'aprime_template_vs_obs.bash')
 
+        # remove previous run script if it exists
+        if os.path.exists(template_out):
+            os.remove(template_out)
         render(
             variables=variables,
             input_path=template_input_path,
@@ -110,7 +123,7 @@ class Aprime(Diag):
             'cd {}\n'.format(aprime_code_path),
             'bash', template_out]
         self._has_been_executed = True
-        return self._submit_cmd_to_manager(config, cmd)
+        return self._submit_cmd_to_manager(config, cmd, event_list)
     # -----------------------------------------------
 
     def postvalidate(self, config, *args, **kwargs):
@@ -125,24 +138,11 @@ class Aprime(Diag):
             True if all output exists as expected
             False otherwise
         """
-        if not self._output_path:
-            self._output_path = os.path.join(
-                config['global']['project_path'],
-                'output', 'diags', self.short_name, 'aprime',
-                '{start:04d}_{end:04d}_vs_{comp}'.format(
-                    start=self.start_year,
-                    end=self.end_year,
-                    comp=self._short_comp_name))
-            if not os.path.exists(self._output_path):
-                os.makedirs(self._output_path)
 
-        self._host_path = os.path.join(
-            config['img_hosting']['host_directory'],
-            self.short_name,
-            'aprime')
         num_missing = self._check_links(config)
-
-        if num_missing is not None and num_missing == 0:
+        if num_missing is None:
+            return True
+        elif num_missing == 0:
             return True
         else:
             if self._has_been_executed:
@@ -153,10 +153,10 @@ class Aprime(Diag):
             return False
     # -----------------------------------------------
 
-    def handle_completion(self, event_list, config, *args):
+    def handle_completion(self, filemanager, event_list, config, *args, **kwargs):
         """
         Setup for webhosting after a successful run
-        
+
         Parameters
         ----------
             event_list (EventList): an event list to push user notifications into
@@ -179,22 +179,11 @@ class Aprime(Diag):
         if not config['global']['host']:
             return
 
-        img_source = os.path.join(
-            self._output_path,
-            'coupled_diagnostics',
-            '{case}_vs_{comp}'.format(
-                case=self.case, comp=self._short_comp_name),
-            '{case}_years{start}-{end}_vs_{comp}'.format(
-                case=self.case,
-                start=self.start_year,
-                end=self.end_year,
-                comp=self._short_comp_name))
-
-        # setup the web hosting
-        self._host_path = os.path.join(
-            config['img_hosting']['host_directory'],
-            self.short_name,
-            'aprime')
+        self.setup_hosting(
+            always_copy=config['global']['always_copy'],
+            img_source=self._output_path,
+            host_path=self._host_path,
+            event_list=event_list)
 
         self._host_url = 'https://{server}/{prefix}/{short_name}/aprime/{case}_years{start}-{end}_vs_{comp}/index.html'.format(
             server=config['img_hosting']['img_host_server'],

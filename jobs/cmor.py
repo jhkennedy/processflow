@@ -23,18 +23,30 @@ class Cmor(Job):
         self._job_type = 'cmor'
         self._requires = 'timeseries'
         self._data_required = ['ts_regrid']
-        config = kwargs.get('config')
-        if config:
-            custom_args = config['post-processing']['timeseries'].get(
-                'custom_args')
-            if custom_args:
-                self.set_custom_args(custom_args)
-        cmor_path = os.path.join(
-            config['global']['project_path'], 'output', 'pp',
-            'cmor', self._short_name, '{}-{}'.format(self.start_year, self.end_year))
-        if not os.path.exists(cmor_path):
-            os.makedirs(cmor_path)
-        self._output_path = cmor_path
+
+        custom_args = kwargs['config']['post-processing'][self.job_type].get(
+            'custom_args')
+        if custom_args:
+            self.set_custom_args(custom_args)
+
+        # setup the output directory, creating it if it doesnt already exist
+        custom_output_path = kwargs['config']['post-processing'][self.job_type].get(
+            'custom_output_path')
+        if custom_output_path:
+            self._output_path = self.setup_output_directory(custom_output_path)
+        else:
+            self._output_path = os.path.join(
+                kwargs['config']['global']['project_path'],
+                'output',
+                'pp',
+                'cmor',
+                self.short_name,
+                self.job_type,
+                '{start:04d}_{end:04d}'.format(
+                    start=self.start_year,
+                    end=self.end_year))
+        if not os.path.exists(self._output_path):
+            os.makedirs(self._output_path)
     # -----------------------------------------------
 
     def _dep_filter(self, job):
@@ -66,7 +78,11 @@ class Cmor(Job):
                     if file.endswith('log') or file.endswith('json'):
                         continue
                     found.append(file)
-        if len(found) >= len(config['post-processing']['cmor']['variable_list']):
+        if config['post-processing']['cmor']['variable_list'] == 'all':
+            expected_file_number = 20
+        else:
+            expected_file_number = len(config['post-processing']['cmor']['variable_list'])
+        if len(found) >= expected_file_number:
             return True
         else:
             return False
@@ -76,14 +92,15 @@ class Cmor(Job):
         """
         CMOR requires timeseries output
         """
-        jobs = kwargs['jobs']
-        try:
-            ts_job, = filter(lambda job: self._dep_filter(job), jobs)
-        except ValueError:
+        for job in kwargs['jobs']:
+            if job.job_type == self._requires \
+                and job.start_year == self.start_year \
+                    and job.end_year == self.end_year:
+                        self.depends_on.append(job.id)
+        if not self.depends_on:
             msg = 'Unable to find timeseries for {}, does this case generate timeseries?'.format(
                 self.msg_prefix())
             raise Exception(msg)
-        self.depends_on.append(ts_job.id)
     # -----------------------------------------------
 
     def execute(self, config, event_list, dryrun=False):
@@ -122,10 +139,10 @@ class Cmor(Job):
             cmd.extend(['--handlers', custom_handlers])
 
         self._has_been_executed = True
-        return self._submit_cmd_to_manager(config, cmd)
+        return self._submit_cmd_to_manager(config, cmd, event_list)
     # -----------------------------------------------
 
-    def handle_completion(self, filemanager, event_list, config):
+    def handle_completion(self, filemanager, event_list, config, *args, **kwargs):
         """
         Adds the output from cmor into the filemanager database as type 'cmorized'
 
@@ -154,7 +171,8 @@ class Cmor(Job):
                         })
             filemanager.add_files(
                 data_type='cmorized',
-                file_list=new_files)
+                file_list=new_files,
+                super_type='derived')
             filemanager.write_database()
             msg = '{prefix}: Job completion handler done'.format(
                 prefix=self.msg_prefix())

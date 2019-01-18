@@ -13,6 +13,7 @@ class DataFile(Model):
     year = IntegerField()
     month = IntegerField()
     datatype = CharField()
+    super_type = CharField()
     local_size = IntegerField()
     transfer_type = CharField()
     remote_uuid = CharField()

@@ -3,6 +3,7 @@ import logging
 from time import sleep
 from subprocess import Popen, PIPE
 from jobinfo import JobInfo
+from util import print_debug
 
 
 class Slurm(object):

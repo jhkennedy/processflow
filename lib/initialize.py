@@ -27,6 +27,9 @@ def parse_args(argv=None, print_help=None):
         '-c', '--config',
         help='Path to configuration file.')
     parser.add_argument(
+        '-d', '--credentail',
+        help='Path to ssh credential json file. Required keys are "username", "password", and optionally "one_time_code"')
+    parser.add_argument(
         '-m', '--max-jobs',
         help='Maximum number of jobs to run at any given time',
         type=int)
@@ -82,6 +85,10 @@ def initialize(argv, **kwargs):
         sys.exit(0)
     if not pargs.config:
         parse_args(print_help=True)
+        return False, False, False
+    if not os.path.isfile(pargs.config):
+        msg = "The referenced config is not a regular file, please select a config file"
+        print_message(msg)
         return False, False, False
     event_list = kwargs['event_list']
     event = kwargs['kill_event']
@@ -140,6 +147,15 @@ Please add a space and run again.'''.format(num=line_index)
             'share',
             'processflow',
             'resources')
+
+    # setup the credential file if the user set the -d flag
+    if pargs.credentail:
+        if not os.path.isfile(pargs.credentail):
+            print_message('User supplied credential file is not a regular file')
+            sys.exit(1)
+        config['global']['credential_path'] = pargs.credentail
+    else:
+        config['global']['credential_path'] = False
 
     # Setup boolean config flags
     config['global']['host'] = True if config.get('img_hosting') else False
@@ -201,7 +217,8 @@ Please add a space and run again.'''.format(num=line_index)
     # Copy the config into the input directory for safe keeping
     input_config_path = os.path.join(
         config['global']['project_path'], 
-        'input', 'run.cfg')
+        'input',
+        'run.cfg')
     try:
         copy(pargs.config, input_config_path)
     except:
@@ -304,11 +321,6 @@ def setup_directories(_args, config):
     config['global']['input_path'] = input_path
     if not os.path.exists(input_path):
         os.makedirs(input_path)
-    for sim in config['simulations']:
-        if sim in ['start_year', 'end_year', 'comparisons']: continue
-        sim_input = os.path.join(input_path, sim)
-        if not os.path.exists(sim_input):
-            os.makedirs(sim_input)
 
     # setup post processing dir
     pp_path = os.path.join(output_path, 'pp')
@@ -321,11 +333,6 @@ def setup_directories(_args, config):
     config['global']['diags_path'] = diags_path
     if not os.path.exists(diags_path):
         os.makedirs(diags_path)
-    for sim in config['simulations']:
-        if sim in ['start_year', 'end_year', 'comparisons']: continue
-        sim_diags = os.path.join(diags_path, config['simulations'][sim]['short_name'])
-        if not os.path.exists(sim_diags):
-            os.makedirs(sim_diags)
 
     # setup run_scripts_path
     run_script_path = os.path.join(

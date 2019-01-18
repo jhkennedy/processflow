@@ -17,17 +17,43 @@ class E3SMDiags(Diag):
         self._job_type = 'e3sm_diags'
         self._requires = 'climo'
         self._data_required = ['climo_regrid']
-        self._host_path = ''
-        self._host_url = ''
-        self._short_comp_name = ''
+
+        if kwargs['config']['global']['host']:
+            self._host_path = os.path.join(
+                kwargs['config']['img_hosting']['host_directory'],
+                self.short_name,
+                'e3sm_diags',
+                '{start:04d}_{end:04d}_vs_{comp}'.format(
+                    start=self.start_year,
+                    end=self.end_year,
+                    comp=self._short_comp_name))
+        else:
+            self._host_path = ''
+
         custom_args = kwargs['config']['diags']['e3sm_diags'].get(
             'custom_args')
         if custom_args:
             self.set_custom_args(custom_args)
-        if self.comparison == 'obs':
-            self._short_comp_name = 'obs'
+        
+        # setup the output directory, creating it if it doesnt already exist
+        custom_output_path = kwargs['config']['diags'][self.job_type].get(
+            'custom_output_path')
+        if custom_output_path:
+            self._replace_dict['COMPARISON'] = self._short_comp_name
+            self._output_path = self.setup_output_directory(custom_output_path)
         else:
-            self._short_comp_name = kwargs['config']['simulations'][self.comparison]['short_name']
+            self._output_path = os.path.join(
+                kwargs['config']['global']['project_path'],
+                'output',
+                'diags',
+                self.short_name,
+                self.job_type,
+                '{start:04d}_{end:04d}_vs_{comp}'.format(
+                    start=self.start_year,
+                    end=self.end_year,
+                    comp=self._short_comp_name))
+        if not os.path.exists(self._output_path):
+            os.makedirs(self._output_path)
     # -----------------------------------------------
 
     def _dep_filter(self, job):
@@ -92,17 +118,6 @@ class E3SMDiags(Diag):
         """
         self._dryrun = dryrun
 
-        # setup the jobs output path, creating it if it doesnt already exist
-        self._output_path = os.path.join(
-            config['global']['project_path'],
-            'output', 'diags', self.short_name, 'e3sm_diags',
-            '{start:04d}_{end:04d}_vs_{comp}'.format(
-                start=self.start_year,
-                end=self.end_year,
-                comp=self._short_comp_name))
-        if not os.path.exists(self._output_path):
-            os.makedirs(self._output_path)
-
         # render the parameter file from the template
         param_template_out = os.path.join(
             config['global']['run_scripts_path'],
@@ -132,6 +147,9 @@ class E3SMDiags(Diag):
             variables['reference_data_path'] = input_path
             variables['ref_name'] = self.comparison
             variables['reference_name'] = config['simulations'][self.comparison]['short_name']
+        # remove previous run script if it exists
+        if os.path.exists(param_template_out):
+            os.remove(param_template_out)
         render(
             variables=variables,
             input_path=template_input_path,
@@ -139,7 +157,7 @@ class E3SMDiags(Diag):
 
         cmd = ['acme_diags_driver.py', '-p', param_template_out]
         self._has_been_executed = True
-        return self._submit_cmd_to_manager(config, cmd)
+        return self._submit_cmd_to_manager(config, cmd, event_list)
     # -----------------------------------------------
 
     def postvalidate(self, config, *args, **kwargs):
@@ -157,10 +175,10 @@ class E3SMDiags(Diag):
         return self._check_links(config)
     # -----------------------------------------------
 
-    def handle_completion(self, event_list, config, *args):
+    def handle_completion(self, filemanager, event_list, config, *args, **kwargs):
         """
         Perform setup for webhosting
-        
+
         Parameters
         ----------
             event_list (EventList): an event list to push user notifications into
@@ -178,22 +196,14 @@ class E3SMDiags(Diag):
             logging.info(msg)
 
         # if hosting is turned off, simply return
-        if not config['global']['host']:
+        if not config['global'].get('host'):
             return
 
-        # else setup the web hosting
-        hostname = config['img_hosting']['img_host_server']
-        self.host_path = os.path.join(
-            config['img_hosting']['host_directory'],
-            self.short_name,
-            'e3sm_diags',
-            '{start:04d}_{end:04d}_vs_{comp}'.format(
-                start=self.start_year,
-                end=self.end_year,
-                comp=self._short_comp_name))
-
-        self.setup_hosting(config, self._output_path,
-                           self.host_path, event_list)
+        self.setup_hosting(
+            always_copy=config['global'].get('always_copy', False),
+            img_source=self._output_path,
+            host_path=self._host_path,
+            event_list=event_list)
 
         self._host_url = 'https://{server}/{prefix}/{case}/e3sm_diags/{start:04d}_{end:04d}_vs_{comp}/viewer/index.html'.format(
             server=config['img_hosting']['img_host_server'],
@@ -206,13 +216,6 @@ class E3SMDiags(Diag):
 
     def _check_links(self, config):
 
-        self._output_path = os.path.join(
-            config['global']['project_path'],
-            'output', 'diags', self.short_name, 'e3sm_diags',
-            '{start:04d}_{end:04d}_vs_{comp}'.format(
-                start=self.start_year,
-                end=self.end_year,
-                comp=self._short_comp_name))
         viewer_path = os.path.join(self._output_path, 'viewer', 'index.html')
         if not os.path.exists(viewer_path):
             msg = '{}: could not find page index at {}'.format(
