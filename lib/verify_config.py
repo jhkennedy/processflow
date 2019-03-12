@@ -377,7 +377,7 @@ def verify_config(config):
         # ------------------------------------------------------------------------
         if config['diags'].get('mpas_analysis'):
             if not config['diags']['mpas_analysis'].get('run_frequency'):
-                msg = 'no run_frequency given for aprime'
+                msg = 'no run_frequency given for MPAS-analysis'
                 messages.append(msg)
             else:
                 if not isinstance(config['diags']['mpas_analysis']['run_frequency'], list):

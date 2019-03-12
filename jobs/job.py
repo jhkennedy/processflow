@@ -263,7 +263,7 @@ class Job(object):
         to the resource manager controller
 
         Parameters:
-            cmd (str): the command to submit
+            cmd (list): a list of the command and its arguments to submit
             config (dict): the global configuration object
         Returns:
             job_id (int): the job_id from the resource manager
