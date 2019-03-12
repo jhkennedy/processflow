@@ -59,7 +59,7 @@ class Cmor(Job):
 
     def postvalidate(self, config, *args, **kwargs):
         """
-        Validate that the CMOR job completed successfuly
+        Validate that the CMOR job completed successfully
 
         Parameters
         ----------
