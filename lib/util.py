@@ -6,6 +6,7 @@ import os
 import socket
 import jinja2
 import json
+import errno
 
 from shutil import rmtree
 from time import sleep
@@ -58,7 +59,7 @@ def get_cmor_output_files(input_path, start_year, end_year):
         return None
     cmor_list = list()
 
-    pattern = r'_{start:04d}01_{end:04d}12\.nc'.format(
+    pattern = r'_{start:04d}01-{end:04d}12\.nc'.format(
         start=start_year, end=end_year)
 
     for root, dirs, files in os.walk(input_path):
@@ -234,3 +235,19 @@ def create_symlink_dir(src_dir, src_list, dst):
         except Exception as e:
             msg = format_debug(e)
             logging.error(msg)
+
+def mkdir_p(path):
+    """
+    Make parent directories as needed and no error if existing. Works like
+    `mkdir -p`.
+
+    Prameterrs:
+        path (str): the path to directory to make
+    """
+    try:
+        os.makedirs(path)
+    except OSError as exc:  # Python >2.5
+        if exc.errno == errno.EEXIST and os.path.isdir(path):
+            pass
+        else:
+            raise
