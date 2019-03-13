@@ -405,8 +405,6 @@ def verify_config(config):
         # check ILAMB
         # ------------------------------------------------------------------------
         if config['diags'].get('ilamb'):
-            from pprint import pprint as pp
-            pp(config['diags']['ilamb'])
             if not config['diags']['ilamb'].get('run_frequency'):
                 msg = 'no run_frequency given for ILAMB'
                 messages.append(msg)

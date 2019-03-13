@@ -7,6 +7,7 @@ from processflow.jobs.climo import Climo
 from processflow.jobs.cmor import Cmor
 from processflow.jobs.diag import Diag
 from processflow.jobs.e3smdiags import E3SMDiags
+from processflow.jobs.ilamb import ILAMB
 from processflow.jobs.mpasanalysis import MPASAnalysis
 from processflow.jobs.regrid import Regrid
 
@@ -25,7 +26,8 @@ job_map = {
     'amwg': AMWG,
     'aprime': Aprime,
     'cmor': Cmor,
-    'mpas_analysis': MPASAnalysis
+    'mpas_analysis': MPASAnalysis,
+    'ilamb': ILAMB
 }
 
 

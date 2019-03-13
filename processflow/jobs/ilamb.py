@@ -2,11 +2,13 @@
 A wrapper class around ILAMB
 """
 import os
+import shutil
+import errno
 import glob
 import logging
 
 from jobs.diag import Diag
-from lib.util import render, get_cmor_output_files, format_debug
+from lib.util import render, get_cmor_output_files, format_debug, mkdir_p
 from lib.jobstatus import JobStatus
 
 
@@ -21,7 +23,7 @@ class ILAMB(Diag):
         """
         super(ILAMB, self).__init__(*args, **kwargs)
         self._job_type = 'ilamb'
-        self._requires = ''
+        self._requires = 'cmor'
         self._host_url = ''
         self.case_start_year = kwargs['config']['simulations']['start_year']
         self._data_required = ['atm', 'lnd']
@@ -36,7 +38,13 @@ class ILAMB(Diag):
                     end=self.end_year,
                     comp=self._short_comp_name))
         else:
-            self._host_path = 'html'
+            self._host_path = os.path.join(
+                'html', 'ilamb', self.short_name,
+                '{start:04d}_{end:04d}_vs_{comp}'.format(
+                                               start=self.start_year,
+                                               end=self.end_year,
+                                               comp=self._short_comp_name))
+        mkdir_p(self._host_path)
 
         custom_args = kwargs['config']['diags'][self.job_type].get(
             'custom_args')
@@ -64,12 +72,6 @@ class ILAMB(Diag):
             os.makedirs(self._output_path)
 
         # need to know the cmor output directory as well
-        custom_args = kwargs['config']['post-processing'][self.job_type].get(
-            'custom_args')
-        if custom_args:
-            self.set_custom_args(custom_args)
-
-        # setup the output directory, creating it if it doesnt already exist
         custom_cmor_path = kwargs['config']['post-processing']['cmor'].get(
             'custom_output_path')
         if custom_cmor_path:
@@ -156,41 +158,39 @@ class ILAMB(Diag):
             output_path=template_out)
 
         models_dir = os.path.join(self._output_path, 'MODELS')
-        if not os.path.exists(models_dir):
-            os.mkdir(models_dir)
-        if not os.path.exists(os.path.join(models_dir, self.short_name)):
-            os.mkdir(os.path.join(models_dir, self.short_name))
+        mkdir_p(os.path.join(models_dir, self.short_name))
         cmor_files = get_cmor_output_files(os.path.abspath(self._cmor_path),
                                            self.start_year,
                                            self.end_year)
         for file_ in cmor_files:
             destination = os.path.join(models_dir, self.short_name,
                                        os.path.basename(file_))
-            if os.path.lexists(destination):
-                continue
             try:
-                os.symlink(file_, destination)
+                shutil.copy(file_, destination)
             except Exception as e:
-                msg = format_debug(e)
-                logging.error(msg)
+                    msg = format_debug(e)
+                    logging.error(msg)
 
-        cmd = ['ilamb-run',
+        cmd = ['export ILAMB_ROOT={} '.format(ilamb_config['ilamb_root']),
+               '\nilamb-run',
                '--config', template_out,
                '--model_root', models_dir,
                '--models', self.short_name,
                '--build_dir', self._host_path]
         if ilamb_config.get('confrontation'):
-            cmd.extend(['--confrontation', ilamb_config['confrontation']])
+            cmd.extend(['--confrontation',
+                        ' '.join(list(ilamb_config['confrontation']))])
         if ilamb_config.get('shift_from') and ilamb_config.get('shift_to'):
             cmd.extend(['--model_year',
                         '{} {}'.format(ilamb_config['shift_from'],
                                        ilamb_config['shift_to'])
                         ])
         if ilamb_config.get('regions'):
-            cmd.extend(['--regions', ilamb_config['regions']])
+            cmd.extend(['--regions',
+                        ' '.join(list(ilamb_config['regions']))])
         if ilamb_config.get('region_definition_files'):
             cmd.extend(['--define_regions',
-                        ilamb_config['region_definition_files']])
+                        ' '.join(list(ilamb_config['region_definition_files']))])
         if ilamb_config.get('clean') in [1, '1', 'true', 'True']:
             cmd.append('--clean')
         if ilamb_config.get('disable_logging') in [1, '1', 'true', 'True']:
@@ -205,7 +205,7 @@ class ILAMB(Diag):
 
         Parameters
         ----------
-            config (dict): the global cofiguration object
+            config (dict): the global config object
         Returns
         -------
             True if all output exists as expected
