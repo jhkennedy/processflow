@@ -172,7 +172,7 @@ class Job(object):
                     datatype=datatype,
                     case=case)
             if not files or len(files) == 0:
-                msg = '{prefix}: filemanager cant find input files for datatype {datatype}'.format(
+                msg = "{prefix}: filemanager can't find input files for datatype {datatype}".format(
                     prefix=self.msg_prefix(),
                     datatype=datatype)
                 logging.error(msg)

@@ -26,7 +26,7 @@ class ILAMB(Diag):
         self._requires = 'cmor'
         self._host_url = ''
         self.case_start_year = kwargs['config']['simulations']['start_year']
-        self._data_required = ['atm', 'lnd']
+        self._data_required = ['cmorized']
 
         if kwargs['config']['global']['host']:
             self._host_path = os.path.join(
@@ -81,6 +81,13 @@ class ILAMB(Diag):
                 kwargs['config']['global']['project_path'],
                 'output', 'pp', 'cmor', self.short_name, 'cmor')
 
+        # create an ILAMB models directory and input data path subdirectory
+        self._ilamb_models_dir = os.path.join(self._output_path, 'MODELS')
+        self._input_base_path = os.path.join(self._ilamb_models_dir,
+                                             self.short_name)
+        # make sure both directories exist
+        mkdir_p(self._input_base_path)
+
     def _dep_filter(self, job):
         """
         find the CMOR job we're waiting for, assuming there's only
@@ -123,6 +130,40 @@ class ILAMB(Diag):
                       'generate CMORized output?'.format(self.msg_prefix())
                 raise Exception(msg)
 
+    def setup_data(self, config, filemanager, case):
+        """
+        Copy all data_types specified in the jobs _data_required field,
+        and appends the path to the copies into the _input_file_paths list
+        """
+
+        # loop over the data types, linking them in one at a time
+        for datatype in self._data_required:
+            # do the normal thing non-cmorized data
+            if datatype != 'cmorized':
+                super(ILAMB, self).setup_data(config, filemanager, case)
+
+            files = get_cmor_output_files(os.path.abspath(self._cmor_path),
+                                          self.start_year,
+                                          self.end_year)
+
+            if not files or len(files) == 0:
+                msg = "{prefix}: filemanager can't find input files for " \
+                      "datatype {datatype}".format(prefix=self.msg_prefix(),
+                                                   datatype=datatype)
+                logging.error(msg)
+                continue
+
+            for file_ in files:
+                destination = os.path.join(self._input_base_path,
+                                           os.path.basename(file_))
+                # keep a reference to the input data for later
+                self._input_file_paths.append(destination)
+                try:
+                    shutil.copy(file_, destination)
+                except Exception as e:
+                    msg = format_debug(e)
+                    logging.error(msg)
+
     def execute(self, config, event_list, slurm_args=None, dryrun=False):
         """
         Generates and submits a run script for ILAMB
@@ -157,24 +198,10 @@ class ILAMB(Diag):
             input_path=template_input_path,
             output_path=template_out)
 
-        models_dir = os.path.join(self._output_path, 'MODELS')
-        mkdir_p(os.path.join(models_dir, self.short_name))
-        cmor_files = get_cmor_output_files(os.path.abspath(self._cmor_path),
-                                           self.start_year,
-                                           self.end_year)
-        for file_ in cmor_files:
-            destination = os.path.join(models_dir, self.short_name,
-                                       os.path.basename(file_))
-            try:
-                shutil.copy(file_, destination)
-            except Exception as e:
-                    msg = format_debug(e)
-                    logging.error(msg)
-
         cmd = ['export ILAMB_ROOT={} '.format(ilamb_config['ilamb_root']),
                '\nilamb-run',
                '--config', template_out,
-               '--model_root', models_dir,
+               '--model_root', self._ilamb_models_dir,
                '--models', self.short_name,
                '--build_dir', self._host_path]
         if ilamb_config.get('confrontation'):
