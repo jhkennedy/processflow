@@ -3,13 +3,12 @@ A wrapper class around ILAMB
 """
 import os
 import shutil
-import errno
 import glob
 import logging
 
-from jobs.diag import Diag
-from lib.util import render, get_cmor_output_files, format_debug, mkdir_p
-from lib.jobstatus import JobStatus
+from processflow.jobs.diag import Diag
+from processflow.lib.util import render, get_cmor_output_files, format_debug, mkdir_p
+from processflow.lib.jobstatus import JobStatus
 
 
 class ILAMB(Diag):
