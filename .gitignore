@@ -1,7 +1,6 @@
 tmp
 config\.json
 
-
 #### joe made this: http://goel.io/joe
 
 #### python ####
@@ -22,6 +21,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!processflow/lib/
 lib64/
 parts/
 sdist/
